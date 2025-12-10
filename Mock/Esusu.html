@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Circle dApp</title>
+    <style>
+      body {
+        font-family: Arial;
+        padding: 20px;
+        max-width: 800px;
+        margin: 0 auto;
+      }
+      #status {
+        margin-top: 10px;
+        font-weight: bold;
+        padding: 10px;
+        border-radius: 5px;
+      }
+      button {
+        margin-top: 10px;
+        padding: 10px 15px;
+        cursor: pointer;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+      }
+      button:hover {
+        background-color: #0056b3;
+      }
+      input {
+        margin-top: 5px;
+        width: 300px;
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+      .box {
+        margin-bottom: 20px;
+        padding: 15px;
+        border: 1px solid #aaa;
+        border-radius: 8px;
+        background-color: #f9f9f9;
+      }
+      pre {
+        background-color: #eee;
+        padding: 10px;
+        border-radius: 4px;
+        overflow-x: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>ROSCA / Savings Circle</h2>
+
+    <div class="box">
+      <h3>Admin</h3>
+      <button id="adminConnectBtn">Connect Admin Wallet</button>
+      <p>Admin Address: <span id="adminAddress">Not connected</span></p>
+
+      <label>Deposit Amount (ADA):</label><br />
+      <input
+        id="amountInput"
+        type="number"
+        placeholder="Enter fixed deposit amount"
+        min="1"
+        value="10"
+      /><br />
+
+      <button id="createBtn">Create Circle</button>
+    </div>
+
+    <div class="box">
+      <h3>Participants</h3>
+      <button id="connectBtn">Connect Wallet</button>
+      <button id="joinBtn">Join Circle</button>
+      <p>Your Address: <span id="userAddress">Not connected</span></p>
+
+      <p><b>Circle Info:</b></p>
+      <div id="circleInfo">
+        <p>Participants: <span id="participantsCount">0</span></p>
+        <p>Current Round: <span id="currentRound">0</span></p>
+        <p>Current Beneficiary: <span id="currentBeneficiary">None</span></p>
+        <p>Contract Balance: <span id="contractBalance">0 ADA</span></p>
+      </div>
+
+      <p><b>Participants List:</b></p>
+      <pre id="participantsList">[]</pre>
+
+      <p><b>Payout Order:</b></p>
+      <pre id="orderList">[]</pre>
+    </div>
+
+    <div class="box">
+      <h3>Actions</h3>
+      <button id="depositBtn">Deposit</button>
+      <button id="payoutBtn">Payout</button>
+      <button id="refreshBtn">Refresh Circle Data</button>
+      <div id="switchWalletSection" style="display: none; margin-top: 10px">
+        <p style="color: orange">⚠️ You are not the current beneficiary</p>
+        <button id="switchWalletBtn">🔄 Switch to Beneficiary Wallet</button>
+      </div>
+    </div>
+
+    <p id="status">Ready to connect...</p>
+
+    <script type="module">
+      import {
+        Lucid,
+        Blockfrost,
+        Data,
+        Constr,
+      } from "https://unpkg.com/lucid-cardano@0.10.11/web/mod.js";
+
+      // -----------------------------------------------------
+      // CONFIG
+      // -----------------------------------------------------
+      const BLOCKFROST_PROJECT_ID = "preprodYjRkHfcazNkL0xxG9C2RdUbUoTrG7wip";
+      const NETWORK = "Preprod";
+      const CBOR_HEX =
+        "590e9801000032332233223322323232323232323232323232323232323232323232323232323232323232323232322323232322322323253353232323232533500415335533533355301512001323350192233350032200200200135001220011233001225335002103610010332330123500422002001350052222004103313357389201286465706f736974206d757374206265207369676e6564206279207061727469636970616e742121600003215335333573466e1cccc040d54004888800c068068cdc028011a80291110018198190819899ab9c4901206d75737420696e63726561736520636f6e74726163742062616c616e63652121000321032153355335330113500322002533532323303300200135006222200135005222200221001132632030335738920115696e76616c696420726f756e6420696e6465782121000301033133573892011177726f6e672062656e656669636961727900032153355335333573466e1cccc040d54004888800c068068cdc0a80119b82350052222003323333553016120013233501a22333501b0030010023501800133501922230033002001200122337000029001000a40006a00a44440080660642066266ae712401237061796f7574206d7573742072656475636520636f6e74726163742062616c616e636500032153355333535500122220021326320303357389211b726f756e64206d757374207570646174652076696120646174756d0003023232323232153353333333574800c46666ae68cdc39aab9d5006480008cccd55cfa8031281f91999aab9f500625040233335573ea00c4a08246666aae7d4018941088cccd55cf9aba250072533553355335533533502902b35742a016426a08a60520022a08642a66a60566ae85402c84d4118c008004541105410c854cd4cd40a80b0d5d0a805109a82318010008a8220a82190a99a98159aba150092135046300200115044150432504303c03b03a0390382503e0362503d2503d2503d2503d03621333573466e1cd40048888004cdc01a8061111000a4004074072264c6406c66ae71240115696e76616c6964207570646174656420646174756d00036135744a00226ae8940044d5d1280089aab9e5001137540024264c6406266ae712411b726f756e64206d757374207570646174652076696120646174756d0003110331335738920112726f756e64206d75737420616476616e636500032103210321533553353012002213500122350012222350092235002222222222222333553026120012235002222253353501822350062232335005233500425335333573466e3c00800415014c5400c414c814c8cd4010814c94cd4ccd5cd19b8f002001054053150031053153350032153350022133500223350022335002233500223303d00200120562335002205623303d00200122205622233500420562225335333573466e1c01800c16416054cd4ccd5cd19b870050020590581333573466e1c01000416416041604160414454cd40048414441444cd4138018014401541240284c98c80bccd5ce2481024c660002f1302d4988854cd40044008884c0c526133300e355335301100121350012200113263202e335738921086e6f20696e7075740002e22220030180183333573466e1cd55cea80224000466442466002006004646464646464646464646464646666ae68cdc39aab9d500c480008cccccccccccc88888888888848cccccccccccc00403403002c02802402001c01801401000c008cd40ac0b0d5d0a80619a8158161aba1500b33502b02d35742a014666aa05eeb940b8d5d0a804999aa817bae502e35742a01066a0560686ae85401cccd540bc0d5d69aba150063232323333573466e1cd55cea801240004664424660020060046464646666ae68cdc39aab9d5002480008cc8848cc00400c008cd40fdd69aba150023040357426ae8940088c98c8110cd5ce02082202109aab9e5001137540026ae854008c8c8c8cccd5cd19b8735573aa004900011991091980080180119a81fbad35742a00460806ae84d5d1280111931902219ab9c041044042135573ca00226ea8004d5d09aba2500223263204033573807a08007c26aae7940044dd50009aba1500533502b75c6ae854010ccd540bc0c48004d5d0a801999aa817bae200135742a00460666ae84d5d1280111931901e19ab9c03903c03a135744a00226ae8940044d5d1280089aba25001135744a00226ae8940044d5d1280089aba25001135744a00226ae8940044d55cf280089baa00135742a00860466ae84d5d1280211931901719ab9c02b02e02c3333573466e1d40152002212200123333573466e1d40192000212200223263202e33573805605c0580566666ae68cdc39aab9d5009480008cccc05ccd406dd71aba15009375a6ae854020cd406dd71aba15007375a6ae84d5d1280391931901619ab9c02902c02a102b16135573ca00226ea80044d55ce9baa001135744a00226ae8940044d55cf280089baa001222323230010053200135502c223350014800088d4008894cd4ccd5cd19b8f00200902d02c13007001130060033200135502b223350014800088d4008894cd4ccd5cd19b8f00200702c02b1001130060032235002222222222222533533355301212001501125335333573466e3c0380040c40c04d40d4004540d0010840c440bcc8004d5409888448894cd40044008884cc014008ccd54c01c480040140100048d400488d4008888888888888cccd4034940cc940cc940cc8ccd54c0484800540448d4004894cd54cd4ccd5cd19b8f350022200235004220020330321333573466e1cd400888004d4010880040cc0c840c84d40dc00c540d80344cd4010894cd40088400c40054088c8004d5408c88448894cd40044d401800c884ccd4024014c010008ccd54c01c4800401401000448d40048800448d40048800848848cc00400c00888ccd5cd19b8f00200101c01b48900222212333300100500400300212322333333357480024a03c4a03c460066eb0008940789407805cc8004d5407488cccd55cf80091a80fa80e9299a98021aba1002215335300435744006426a04266a03c0040022a03e2a03c02e46666666ae900049406c9406c9406c8d4070dd68011280d80a11999999aba40012501a2501a2501a2501a23501b375c0040262464460046eb0004c8004d5406888cccd55cf8009280d119a80c98021aba1002300335744004028464646666ae68cdc39aab9d5002480008cc8848cc00400c008c028d5d0a80118029aba135744a004464c6402866ae700440500484d55cf280089baa0012323232323333573466e1cd55cea8022400046666444424666600200a0080060046464646666ae68cdc39aab9d5002480008cc8848cc00400c008c04cd5d0a80119a8068091aba135744a004464c6403266ae7005806405c4d55cf280089baa00135742a008666aa010eb9401cd5d0a8019919191999ab9a3370ea0029002119091118010021aba135573ca00646666ae68cdc3a80124004464244460020086eb8d5d09aab9e500423333573466e1d400d20002122200323263201b33573803003603203002e26aae7540044dd50009aba1500233500975c6ae84d5d1280111931900a99ab9c012015013135744a00226ae8940044d55cf280089baa0011335500175ceb44488c88c008dd5800990009aa80b91191999aab9f00225018233501733221233001003002300635573aa004600a6aae794008c010d5d100180909aba100112232323333573466e1d400520002350183005357426aae79400c8cccd5cd19b87500248008940608c98c8048cd5ce00780900800789aab9d500113754002464646666ae68cdc3a800a400c46424444600800a600e6ae84d55cf280191999ab9a3370ea004900211909111180100298049aba135573ca00846666ae68cdc3a801a400446424444600200a600e6ae84d55cf280291999ab9a3370ea00890001190911118018029bae357426aae7940188c98c8048cd5ce00780900800780700689aab9d500113754002464646666ae68cdc39aab9d5002480008cc8848cc00400c008c014d5d0a8011bad357426ae8940088c98c8038cd5ce00580700609aab9e5001137540024646666ae68cdc39aab9d5001480008dd71aba135573ca004464c6401866ae700240300284dd5000919191919191999ab9a3370ea002900610911111100191999ab9a3370ea004900510911111100211999ab9a3370ea00690041199109111111198008048041bae35742a00a6eb4d5d09aba2500523333573466e1d40112006233221222222233002009008375c6ae85401cdd71aba135744a00e46666ae68cdc3a802a400846644244444446600c01201060186ae854024dd71aba135744a01246666ae68cdc3a8032400446424444444600e010601a6ae84d55cf280591999ab9a3370ea00e900011909111111180280418071aba135573ca018464c6402a66ae7004805404c04804404003c0380344d55cea80209aab9e5003135573ca00426aae7940044dd50009191919191999ab9a3370ea002900111999110911998008028020019bad35742a0086eb4d5d0a8019bad357426ae89400c8cccd5cd19b875002480008c8488c00800cc020d5d09aab9e500623263200e33573801601c01801626aae75400c4d5d1280089aab9e500113754002464646666ae68cdc3a800a400446424460020066eb8d5d09aab9e500323333573466e1d400920002321223002003375c6ae84d55cf280211931900599ab9c00800b009008135573aa00226ea8004488c8c8cccd5cd19b87500148010848880048cccd5cd19b875002480088c84888c00c010c018d5d09aab9e500423333573466e1d400d20002122200223263200c33573801201801401201026aae7540044dd50009191999ab9a3370ea0029001100511999ab9a3370ea0049000100511931900419ab9c005008006005135573a6ea800524010350543100232632003335738921206578706563746564206f6e6520636f6e74696e75696e67206f757470757421210000349848004c8004d5401c8894cd4008540208854cd4ccd5cd19b870034800001c0184d402c0084cc014004cdc0801a40042440042440022244004244244660020080062424460040062244002224646002002446600660040040021";
+
+      const script = {
+        type: "PlutusV2",
+        script: CBOR_HEX,
+      };
+
+      // -----------------------------------------------------
+      // GLOBALS
+      // -----------------------------------------------------
+      let lucid = null;
+      let adminAddress = null;
+      let userAddress = null;
+      let scriptAddress = null;
+      let circleData = null;
+
+      // -----------------------------------------------------
+      // INIT LUCID
+      // -----------------------------------------------------
+      async function initLucid() {
+        lucid = await Lucid.new(
+          new Blockfrost(
+            "https://cardano-preprod.blockfrost.io/api/v0",
+            BLOCKFROST_PROJECT_ID
+          ),
+          NETWORK
+        );
+        scriptAddress = lucid.utils.validatorToAddress(script);
+      }
+      await initLucid();
+
+      // -----------------------------------------------------
+      // STATUS HELPERS
+      // -----------------------------------------------------
+      function show(msg, error = false) {
+        const el = document.getElementById("status");
+        el.innerText = msg;
+        el.style.color = error ? "red" : "green";
+        el.style.backgroundColor = error ? "#ffe6e6" : "#e6ffe6";
+      }
+
+      // -----------------------------------------------------
+      // CONNECT WALLET
+      // -----------------------------------------------------
+      async function connectWallet(type = "user") {
+        try {
+          if (!window.cardano || !window.cardano.lace) {
+            alert("Lace wallet not found! Please install Lace wallet.");
+            return null;
+          }
+
+          const api = await window.cardano.lace.enable();
+          lucid.selectWallet(api);
+
+          const addr = await lucid.wallet.address();
+
+          if (type === "admin") {
+            adminAddress = addr;
+            document.getElementById("adminAddress").innerText = addr;
+            show("Admin wallet connected");
+          } else {
+            userAddress = addr;
+            document.getElementById("userAddress").innerText = addr;
+            show("User wallet connected");
+          }
+
+          return addr;
+        } catch (err) {
+          show("Failed to connect wallet: " + err.message, true);
+          return null;
+        }
+      }
+
+      // -----------------------------------------------------
+      // LOAD CIRCLE DATA FROM CONTRACT
+      // -----------------------------------------------------
+      async function loadCircleData() {
+        try {
+          const scriptUtxos = await lucid.utxosAt(scriptAddress);
+          if (scriptUtxos.length === 0) {
+            circleData = null;
+            updateUI();
+            show("No active circle found");
+            return;
+          }
+
+          const scriptUtxo = scriptUtxos[0]; // Get the first UTXO
+          if (!scriptUtxo.datum) {
+            show("No datum found in UTXO", true);
+            return;
+          }
+
+          const datum = Data.from(scriptUtxo.datum);
+          console.log("Loaded datum:", datum);
+
+          // Parse the datum based on your Haskell data structure
+          circleData = {
+            participants: datum.fields[0] || [],
+            amount: Number(datum.fields[1]) || 0,
+            order: datum.fields[2] || [],
+            round: Number(datum.fields[3]) || 0,
+          };
+
+          // Calculate contract balance
+          let totalBalance = 0n;
+          for (let utxo of scriptUtxos) {
+            totalBalance += utxo.assets.lovelace;
+          }
+
+          // Update UI
+          updateUI();
+          document.getElementById("contractBalance").innerText = `${(
+            Number(totalBalance) / 1_000_000
+          ).toFixed(2)} ADA`;
+
+          show("Circle data loaded successfully");
+        } catch (err) {
+          console.error("Error loading circle data:", err);
+          show("Failed to load circle data", true);
+        }
+      }
+
+      // -----------------------------------------------------
+      // UPDATE UI WITH CIRCLE DATA
+      // -----------------------------------------------------
+      function updateUI() {
+        if (!circleData) {
+          document.getElementById("participantsCount").innerText = "0";
+          document.getElementById("currentRound").innerText = "0";
+          document.getElementById("currentBeneficiary").innerText = "None";
+          document.getElementById("participantsList").innerText = "[]";
+          document.getElementById("orderList").innerText = "[]";
+          return;
+        }
+
+        document.getElementById("participantsCount").innerText =
+          circleData.participants.length;
+        document.getElementById("currentRound").innerText = circleData.round;
+
+        // Get current beneficiary
+        const currentBeneficiary = circleData.order[circleData.round] || "None";
+        document.getElementById("currentBeneficiary").innerText =
+          currentBeneficiary;
+
+        document.getElementById("participantsList").innerText = JSON.stringify(
+          circleData.participants,
+          null,
+          2
+        );
+        document.getElementById("orderList").innerText = JSON.stringify(
+          circleData.order,
+          null,
+          2
+        );
+
+        // Check if current user is beneficiary
+        if (userAddress) {
+          const { paymentCredential } =
+            lucid.utils.getAddressDetails(userAddress);
+          const userPkh = paymentCredential?.hash;
+          const switchSection = document.getElementById("switchWalletSection");
+
+          if (userPkh === currentBeneficiary) {
+            switchSection.style.display = "none";
+            show("You are the current beneficiary! You can claim payout.");
+          } else {
+            switchSection.style.display = "block";
+          }
+        }
+      }
+
+      // -----------------------------------------------------
+      // CREATE CIRCLE (ADMIN)
+      // -----------------------------------------------------
+      document.getElementById("createBtn").onclick = async () => {
+        if (!adminAddress) {
+          const connected = await connectWallet("admin");
+          if (!connected) return;
+        }
+
+        const amount = Number(document.getElementById("amountInput").value);
+        if (!amount || amount <= 0) {
+          show("Enter valid deposit amount", true);
+          return;
+        }
+
+        try {
+          show("Creating circle...");
+
+          // Initial datum with empty participants and order
+          const initialDatum = Data.to(
+            new Constr(0, [
+              [], // participants (empty initially)
+              BigInt(amount * 1_000_000), // amount in lovelace
+              [], // order (empty initially)
+              BigInt(0), // round starts at 0
+            ])
+          );
+
+          const tx = await lucid
+            .newTx()
+            .payToContract(
+              scriptAddress,
+              { inline: initialDatum },
+              { lovelace: 2_000_000n } // Initial funding
+            )
+            .complete();
+
+          const signed = await tx.sign().complete();
+          const hash = await signed.submit();
+
+          show("Circle created successfully! Tx: " + hash);
+          await loadCircleData();
+        } catch (err) {
+          console.error(err);
+          show("Failed to create circle: " + err.message, true);
+        }
+      };
+
+      // -----------------------------------------------------
+      // JOIN CIRCLE
+      // -----------------------------------------------------
+      document.getElementById("joinBtn").onclick = async () => {
+        if (!userAddress) {
+          const connected = await connectWallet("user");
+          if (!connected) return;
+        }
+
+        try {
+          await loadCircleData();
+          if (!circleData) {
+            show("No active circle to join", true);
+            return;
+          }
+
+          const { paymentCredential } =
+            lucid.utils.getAddressDetails(userAddress);
+          const userPkh = paymentCredential?.hash;
+
+          if (!userPkh) {
+            show("Could not get wallet PKH", true);
+            return;
+          }
+
+          // Check if already joined in current local state
+          if (circleData.participants.includes(userPkh)) {
+            show("You are already a participant");
+            return;
+          }
+
+          show("Joining circle (on-chain)...");
+
+          // Get the current contract UTXO
+          const scriptUtxos = await lucid.utxosAt(scriptAddress);
+          if (scriptUtxos.length === 0) {
+            show("Circle contract not found!", true);
+            return;
+          }
+
+          const scriptUtxo = scriptUtxos[0];
+          const currentDatum = Data.from(scriptUtxo.datum);
+
+          // Extract current on-chain data
+          const currentParticipants = currentDatum.fields[0] || [];
+          const currentAmount = currentDatum.fields[1] || 0n;
+          const currentOrder = currentDatum.fields[2] || [];
+          const currentRound = currentDatum.fields[3] || 0n;
+
+          // Check if already joined on-chain
+          if (currentParticipants.includes(userPkh)) {
+            show("You are already a participant on-chain");
+            return;
+          }
+
+          // Create updated datum with new participant
+          const updatedParticipants = [...currentParticipants, userPkh];
+          const updatedOrder = [...currentOrder, userPkh];
+
+          const newDatum = Data.to(
+            new Constr(0, [
+              updatedParticipants,
+              currentAmount,
+              updatedOrder,
+              currentRound, // Round doesn't change when joining
+            ])
+          );
+
+          // We need a way to update the datum - we'll use a Deposit redeemer with 0 ADA
+          // Alternatively, you could create a separate "Join" redeemer in your validator
+          const joinRedeemer = Data.to(new Constr(0, [])); // Using Deposit redeemer
+
+          const tx = await lucid
+            .newTx()
+            .collectFrom([scriptUtxo], joinRedeemer)
+            .payToContract(
+              scriptAddress,
+              { inline: newDatum },
+              { lovelace: scriptUtxo.assets.lovelace } // Keep same balance
+            )
+            .attachSpendingValidator(script)
+            .addSigner(userAddress) // Joiner must sign
+            .complete();
+
+          const signedTx = await tx.sign().complete();
+          const txHash = await signedTx.submit();
+
+          show(`Successfully joined the circle! Transaction: ${txHash}`);
+
+          // Wait a moment for blockchain to update, then reload data
+          setTimeout(() => loadCircleData(), 3000);
+        } catch (err) {
+          console.error("Failed to join circle:", err);
+          show("Failed to join circle: " + err.message, true);
+        }
+      };
+
+      // -----------------------------------------------------
+      // DEPOSIT
+      // -----------------------------------------------------
+      document.getElementById("depositBtn").onclick = async () => {
+        if (!userAddress) {
+          const connected = await connectWallet("user");
+          if (!connected) return;
+        }
+
+        const amount = Number(document.getElementById("amountInput").value);
+        if (!amount || amount <= 0) {
+          show("Enter valid deposit amount", true);
+          return;
+        }
+
+        try {
+          await loadCircleData();
+          if (!circleData) {
+            show("No active circle found", true);
+            return;
+          }
+
+          const { paymentCredential } =
+            lucid.utils.getAddressDetails(userAddress);
+          const userPkh = paymentCredential?.hash;
+
+          // Check if user is a participant
+          if (!circleData.participants.includes(userPkh)) {
+            show("You must join the circle first", true);
+            return;
+          }
+
+          show("Processing deposit...");
+
+          const scriptUtxos = await lucid.utxosAt(scriptAddress);
+          if (scriptUtxos.length === 0) {
+            show("No contract UTXO found", true);
+            return;
+          }
+
+          const scriptUtxo = scriptUtxos[0];
+          const currentDatum = Data.from(scriptUtxo.datum);
+          const currentBalance = scriptUtxo.assets.lovelace;
+          const depositLovelace = BigInt(amount * 1_000_000);
+          const newBalance = currentBalance + depositLovelace;
+
+          // ✅ CRITICAL: Use the DEPOSIT redeemer (Constr 0)
+          const depositRedeemer = Data.to(new Constr(0, []));
+
+          const tx = await lucid
+            .newTx()
+            // Spend the current script UTXO with the Deposit redeemer
+            .collectFrom([scriptUtxo], depositRedeemer)
+            // Pay back to the script with the updated balance and SAME datum
+            .payToContract(
+              scriptAddress,
+              { inline: Data.to(currentDatum) }, // Datum does not change for a deposit
+              { lovelace: newBalance }
+            )
+            .attachSpendingValidator(script)
+            .addSigner(userAddress) // The depositing participant must sign
+            .complete();
+
+          const signedTx = await tx.sign().complete();
+          const txHash = await signedTx.submit();
+          show(`Deposit of ${amount} ADA successful! Tx: ${txHash}`);
+          //   await loadCircleData();
+        } catch (err) {
+          console.error("Deposit failed:", err);
+          show("Deposit failed: " + err.message, true);
+        }
+      };
+
+      // -----------------------------------------------------
+      // PAYOUT
+      // -----------------------------------------------------
+      document.getElementById("payoutBtn").onclick = async () => {
+        if (!userAddress) {
+          const connected = await connectWallet("user");
+          if (!connected) return;
+        }
+
+        try {
+          await loadCircleData();
+          if (!circleData) {
+            show("No active circle found", true);
+            return;
+          }
+
+          const { paymentCredential } =
+            lucid.utils.getAddressDetails(userAddress);
+          const userPkh = paymentCredential?.hash;
+
+          // Check if user is the current beneficiary
+          const currentBeneficiary = circleData.order[circleData.round];
+          if (userPkh !== currentBeneficiary) {
+            show("You are not the current beneficiary", true);
+            return;
+          }
+
+          show("Processing payout...");
+
+          const scriptUtxos = await lucid.utxosAt(scriptAddress);
+          if (scriptUtxos.length === 0) {
+            show("No contract UTXO found", true);
+            return;
+          }
+
+          const scriptUtxo = scriptUtxos[0];
+          const currentBalance = scriptUtxo.assets.lovelace;
+
+          // Calculate payout: amount * number of participants
+          const payoutAmount =
+            BigInt(circleData.amount) * BigInt(circleData.participants.length);
+          const remainder = currentBalance - payoutAmount;
+
+          if (remainder < 0n) {
+            show("Insufficient funds for payout", true);
+            return;
+          }
+
+          // Update datum with next round
+          const newDatum = Data.to(
+            new Constr(0, [
+              circleData.participants,
+              BigInt(circleData.amount),
+              circleData.order,
+              BigInt(circleData.round + 1),
+            ])
+          );
+
+          const redeemer = Data.to(new Constr(1, [])); // Payout action
+
+          const tx = await lucid
+            .newTx()
+            .collectFrom([scriptUtxo], redeemer)
+            .payToContract(
+              scriptAddress,
+              { inline: newDatum },
+              { lovelace: remainder }
+            )
+            .payToAddress(userAddress, {
+              lovelace: payoutAmount,
+            })
+            .attachSpendingValidator(script)
+            .addSigner(userAddress) // Beneficiary must sign
+            .complete();
+
+          const signed = await tx.sign().complete();
+          const hash = await signed.submit();
+
+          show("Payout successful! Tx: " + hash);
+          await loadCircleData();
+        } catch (err) {
+          console.error(err);
+          show("Payout failed: " + err.message, true);
+        }
+      };
+
+      // -----------------------------------------------------
+      // SWITCH WALLET
+      // -----------------------------------------------------
+      document.getElementById("switchWalletBtn").onclick = async () => {
+        show("Please switch wallet in your Lace wallet popup...");
+        await connectWallet("user");
+        await loadCircleData();
+      };
+
+      // -----------------------------------------------------
+      // REFRESH BUTTON
+      // -----------------------------------------------------
+      document.getElementById("refreshBtn").onclick = async () => {
+        show("Refreshing circle data...");
+        await loadCircleData();
+      };
+
+      // -----------------------------------------------------
+      // INITIAL CONNECT BUTTON
+      // -----------------------------------------------------
+      document.getElementById("connectBtn").onclick = async () => {
+        await connectWallet("user");
+        await loadCircleData();
+      };
+
+      // -----------------------------------------------------
+      // ADMIN CONNECT BUTTON
+      // -----------------------------------------------------
+      document.getElementById("adminConnectBtn").onclick = async () => {
+        await connectWallet("admin");
+      };
+
+      // Initial load
+      show("Ready to connect wallet...");
+    </script>
+  </body>
+</html>
